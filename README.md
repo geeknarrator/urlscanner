@@ -2,33 +2,57 @@
 
 A self-service Spring Boot application for scanning URLs for security issues using urlscan.io API. The system provides JWT-based authentication, asynchronous scan processing, result caching, and comprehensive REST APIs for developers to manage their URL scans.
 
+## 🚀 One-Command Setup for Code Reviewers
+
+**For code reviewers who want to test the application immediately:**
+
+### **Linux/macOS:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/your-repo/urlscanner/main/setup.sh | bash
+# OR if you have the code locally:
+./setup.sh
+```
+
+### **Windows:**
+```cmd
+setup.bat
+```
+
+### **What the setup script does:**
+- ✅ Checks Docker prerequisites
+- ✅ Generates secure random secrets automatically
+- ✅ Builds and starts all services
+- ✅ Creates a sample user: `reviewer@example.com` / `reviewer123`
+- ✅ Seeds sample URL scan data
+- ✅ Provides ready-to-use curl commands
+
+**After setup completes, the application will be available at: http://localhost:8080**
+
+---
+
 ## Prerequisites
 
-- Java 17 or higher
-- Maven 3.6+
-- Docker and Docker Compose
+- Docker and Docker Compose (that's it!)
+- (Optional for manual setup) Java 17 or higher, Maven 3.6+
 - (Optional) Kubernetes cluster for production deployment
 
-## Quick Start - Docker Compose (Recommended)
+## Manual Setup - Docker Compose
 
-The easiest way to run the application locally is using Docker Compose:
+If you prefer manual setup:
 
 ```bash
-# Clone or navigate to the project directory
-cd urlscanner
+# 1. Copy environment template
+cp .env.example .env
 
-# Build and start all services
-docker-compose up --build
+# 2. Edit .env with your values (or use defaults for testing)
 
-# Or run in detached mode
+# 3. Build and start services
 docker-compose up --build -d
 ```
 
 This will start:
 - PostgreSQL database on port 5432
 - URL Scanner application on port 8080
-
-The application will be available at: http://localhost:8080
 
 ## Running Locally without Docker
 

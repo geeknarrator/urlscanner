@@ -35,6 +35,20 @@ spec:
               key: password
         - name: SERVER_PORT
           value: "8080"
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: jwt-secret
+        - name: JWT_EXPIRATION
+          value: "86400000"
+        - name: URLSCAN_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: urlscan-api-key
+        - name: SPRING_PROFILES_ACTIVE
+          value: "production"
         ports:
         - containerPort: 8080
         livenessProbe:

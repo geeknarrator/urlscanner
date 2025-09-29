@@ -5,9 +5,9 @@ services:
     image: postgres:15
     container_name: urlscanner-postgres
     environment:
-      POSTGRES_DB: urlscanner
-      POSTGRES_USER: urlscanner
-      POSTGRES_PASSWORD: password
+      POSTGRES_DB: ${DB_NAME:-urlscanner}
+      POSTGRES_USER: ${DB_USER:-urlscanner}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-password}
     ports:
       - "5432:5432"
     volumes:
@@ -20,14 +20,18 @@ services:
     build: .
     container_name: urlscanner-app
     ports:
-      - "8080:8080"
+      - "${SERVER_PORT:-8080}:8080"
     environment:
       DB_HOST: postgres
-      DB_PORT: 5432
-      DB_NAME: urlscanner
-      DB_USER: urlscanner
-      DB_PASSWORD: password
-      SERVER_PORT: 8080
+      DB_PORT: ${DB_PORT:-5432}
+      DB_NAME: ${DB_NAME:-urlscanner}
+      DB_USER: ${DB_USER:-urlscanner}
+      DB_PASSWORD: ${DB_PASSWORD:-password}
+      SERVER_PORT: ${SERVER_PORT:-8080}
+      JWT_SECRET: ${JWT_SECRET:-mySecretKeyForJWTWhichNeedsToBeVeryLongForHS256Algorithm}
+      JWT_EXPIRATION: ${JWT_EXPIRATION:-86400000}
+      URLSCAN_API_KEY: ${URLSCAN_API_KEY}
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-docker}
     depends_on:
       - postgres
     networks:
