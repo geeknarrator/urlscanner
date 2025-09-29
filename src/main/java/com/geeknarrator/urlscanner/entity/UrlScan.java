@@ -27,11 +27,22 @@ public class UrlScan {
     @Column(columnDefinition = "TEXT")
     private String result;
     
+    @Column(name = "user_id", nullable = false)
+    private Long userId;
+    
+    @Column(name = "external_scan_id")
+    private String externalScanId;
+    
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id", insertable = false, updatable = false)
+    private User user;
+    
     public UrlScan() {}
     
-    public UrlScan(String url) {
+    public UrlScan(String url, Long userId) {
         this.url = url;
-        this.status = ScanStatus.PENDING;
+        this.userId = userId;
+        this.status = ScanStatus.SUBMITTED;
         this.createdAt = LocalDateTime.now();
         this.updatedAt = LocalDateTime.now();
     }
@@ -84,15 +95,39 @@ public class UrlScan {
         this.result = result;
     }
     
+    public Long getUserId() {
+        return userId;
+    }
+    
+    public void setUserId(Long userId) {
+        this.userId = userId;
+    }
+    
+    public String getExternalScanId() {
+        return externalScanId;
+    }
+    
+    public void setExternalScanId(String externalScanId) {
+        this.externalScanId = externalScanId;
+    }
+    
+    public User getUser() {
+        return user;
+    }
+    
+    public void setUser(User user) {
+        this.user = user;
+    }
+    
     @PreUpdate
     public void preUpdate() {
         this.updatedAt = LocalDateTime.now();
     }
     
     public enum ScanStatus {
-        PENDING,
-        IN_PROGRESS,
-        COMPLETED,
+        SUBMITTED,
+        PROCESSING,
+        DONE,
         FAILED
     }
 }
