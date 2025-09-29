@@ -6,7 +6,7 @@ metadata:
 data:
   init.sql: |
     CREATE TABLE IF NOT EXISTS users (
-        id SERIAL PRIMARY KEY,
+        id BIGSERIAL PRIMARY KEY,
         email VARCHAR(255) UNIQUE NOT NULL,
         password VARCHAR(255) NOT NULL,
         first_name VARCHAR(100) NOT NULL,
@@ -17,7 +17,7 @@ data:
     );
 
     CREATE TABLE IF NOT EXISTS url_scans (
-        id SERIAL PRIMARY KEY,
+        id BIGSERIAL PRIMARY KEY,
         url VARCHAR(2048) NOT NULL,
         scan_status VARCHAR(20) NOT NULL DEFAULT 'SUBMITTED',
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,

@@ -80,15 +80,9 @@ psql -h localhost -U urlscanner -d urlscanner -f init.sql
 
 ```bash
 # Build the application
-./mvnw clean install
+mvn clean install
 
 # Run the application
-./mvnw spring-boot:run
-```
-
-Or using Maven directly:
-```bash
-mvn clean install
 mvn spring-boot:run
 ```
 
@@ -216,7 +210,7 @@ The application can be configured using environment variables:
 
 ### Running Tests
 ```bash
-./mvnw test
+mvn test
 ```
 
 ### Building Docker Image

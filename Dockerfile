@@ -1,14 +1,11 @@
-FROM openjdk:17-jdk-slim as build
+FROM maven:latest as build
 
 WORKDIR /workspace/app
 
-COPY mvnw .
-COPY .mvn .mvn
 COPY pom.xml .
 COPY src src
 
-RUN chmod +x ./mvnw
-RUN ./mvnw install -DskipTests
+RUN mvn clean package -DskipTests
 
 FROM openjdk:17-jdk-slim
 
