@@ -1,0 +1,11 @@
+CREATE TABLE IF NOT EXISTS url_scans (
+    id SERIAL PRIMARY KEY,
+    url VARCHAR(2048) NOT NULL,
+    scan_status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    result TEXT
+);
+
+CREATE INDEX idx_url_scans_status ON url_scans(scan_status);
+CREATE INDEX idx_url_scans_created_at ON url_scans(created_at);
