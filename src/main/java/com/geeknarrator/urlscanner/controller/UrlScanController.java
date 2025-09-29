@@ -29,17 +29,32 @@ public class UrlScanController {
     @PostMapping
     public ResponseEntity<UrlScan> createScan(@Valid @RequestBody CreateScanRequest request) {
         Long userId = SecurityUtils.getCurrentUserId();
+        LocalDateTime since = LocalDateTime.now().minusHours(cacheTtlHours);
 
-        // --- Caching Logic ---
-        Optional<UrlScan> cachedScan = urlScanRepository.findFirstByUrlAndStatusAndCreatedAtAfterOrderByCreatedAtDesc(
+        // --- Step 1: User-level Deduplication ---
+        // Check if the current user already has a recent scan for this exact URL.
+        Optional<UrlScan> userExistingScan = urlScanRepository.findFirstByUserIdAndUrlAndCreatedAtAfterOrderByCreatedAtDesc(
+                userId,
                 request.getUrl(),
-                UrlScan.ScanStatus.DONE,
-                LocalDateTime.now().minusHours(cacheTtlHours)
+                since
         );
 
-        if (cachedScan.isPresent()) {
-            // Cache hit: Create a new scan for this user with the cached result
-            UrlScan scanFromCache = cachedScan.get();
+        if (userExistingScan.isPresent()) {
+            // If the user already has a recent scan, just return it to prevent duplicates.
+            return ResponseEntity.ok(userExistingScan.get());
+        }
+
+        // --- Step 2: Global Cache Check ---
+        // Check for a recent, completed scan from *any* user to use as a cache.
+        Optional<UrlScan> globalCachedScan = urlScanRepository.findFirstByUrlAndStatusAndCreatedAtAfterOrderByCreatedAtDesc(
+                request.getUrl(),
+                UrlScan.ScanStatus.DONE,
+                since
+        );
+
+        if (globalCachedScan.isPresent()) {
+            // Cache hit: Create a new scan record for this user with the cached result.
+            UrlScan scanFromCache = globalCachedScan.get();
             UrlScan newScan = new UrlScan(request.getUrl(), userId);
             newScan.setStatus(UrlScan.ScanStatus.DONE); // Instantly done
             newScan.setResult(scanFromCache.getResult()); // Copy the result
@@ -47,9 +62,9 @@ public class UrlScanController {
             UrlScan savedScan = urlScanRepository.save(newScan);
             return ResponseEntity.ok(savedScan);
         }
-        // --- End Caching Logic ---
 
-        // Cache miss: Create a new scan to be processed by the worker
+        // --- Step 3: New Submission ---
+        // Cache miss: Create a new scan to be processed by the worker.
         UrlScan newScan = new UrlScan(request.getUrl(), userId);
         UrlScan savedScan = urlScanRepository.save(newScan);
         return ResponseEntity.ok(savedScan);
