@@ -1,6 +1,8 @@
 package com.geeknarrator.urlscanner.repository;
 
 import com.geeknarrator.urlscanner.entity.UrlScan;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
@@ -12,7 +14,7 @@ import java.util.Optional;
 @Repository
 public interface UrlScanRepository extends JpaRepository<UrlScan, Long> {
     
-    List<UrlScan> findByUserIdOrderByCreatedAtDesc(Long userId);
+    Page<UrlScan> findByUserId(Long userId, Pageable pageable);
     
     List<UrlScan> findByUserIdAndStatus(Long userId, UrlScan.ScanStatus status);
     
