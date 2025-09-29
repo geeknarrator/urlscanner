@@ -4,7 +4,6 @@ import com.geeknarrator.urlscanner.entity.UrlScan;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDateTime;
@@ -13,17 +12,21 @@ import java.util.Optional;
 
 @Repository
 public interface UrlScanRepository extends JpaRepository<UrlScan, Long> {
-    
+
     Page<UrlScan> findByUserId(Long userId, Pageable pageable);
-    
+
     List<UrlScan> findByUserIdAndStatus(Long userId, UrlScan.ScanStatus status);
-    
+
     Optional<UrlScan> findByIdAndUserId(Long id, Long userId);
-    
-    @Query("SELECT u FROM UrlScan u WHERE u.url = :url AND u.status = 'DONE' AND u.createdAt > :since")
-    Optional<UrlScan> findRecentCompletedScanByUrl(String url, LocalDateTime since);
-    
+
+    /**
+     * Finds the most recent completed scan for a given URL after a specific time.
+     * This is used for caching to avoid re-scanning the same URL.
+     * It is intentionally not user-specific to maximize cache hits across the system.
+     */
+    Optional<UrlScan> findFirstByUrlAndStatusAndCreatedAtAfterOrderByCreatedAtDesc(String url, UrlScan.ScanStatus status, LocalDateTime createdAt);
+
     List<UrlScan> findByStatus(UrlScan.ScanStatus status);
-    
+
     Optional<UrlScan> findByExternalScanId(String externalScanId);
 }

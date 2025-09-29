@@ -7,11 +7,13 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDateTime;
 import java.util.Optional;
 
 @RestController
@@ -21,11 +23,35 @@ public class UrlScanController {
     @Autowired
     private UrlScanRepository urlScanRepository;
 
+    @Value("${urlscan.cache.ttl.hours:24}")
+    private int cacheTtlHours;
+
     @PostMapping
     public ResponseEntity<UrlScan> createScan(@Valid @RequestBody CreateScanRequest request) {
         Long userId = SecurityUtils.getCurrentUserId();
-        UrlScan scan = new UrlScan(request.getUrl(), userId);
-        UrlScan savedScan = urlScanRepository.save(scan);
+
+        // --- Caching Logic ---
+        Optional<UrlScan> cachedScan = urlScanRepository.findFirstByUrlAndStatusAndCreatedAtAfterOrderByCreatedAtDesc(
+                request.getUrl(),
+                UrlScan.ScanStatus.DONE,
+                LocalDateTime.now().minusHours(cacheTtlHours)
+        );
+
+        if (cachedScan.isPresent()) {
+            // Cache hit: Create a new scan for this user with the cached result
+            UrlScan scanFromCache = cachedScan.get();
+            UrlScan newScan = new UrlScan(request.getUrl(), userId);
+            newScan.setStatus(UrlScan.ScanStatus.DONE); // Instantly done
+            newScan.setResult(scanFromCache.getResult()); // Copy the result
+            newScan.setExternalScanId(scanFromCache.getExternalScanId()); // Copy the external ID
+            UrlScan savedScan = urlScanRepository.save(newScan);
+            return ResponseEntity.ok(savedScan);
+        }
+        // --- End Caching Logic ---
+
+        // Cache miss: Create a new scan to be processed by the worker
+        UrlScan newScan = new UrlScan(request.getUrl(), userId);
+        UrlScan savedScan = urlScanRepository.save(newScan);
         return ResponseEntity.ok(savedScan);
     }
 

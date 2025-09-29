@@ -1,378 +1,165 @@
 # URL Scanner Application
 
-A self-service Spring Boot application for scanning URLs for security issues using urlscan.io API. The system provides JWT-based authentication, asynchronous scan processing, result caching, and comprehensive REST APIs for developers to manage their URL scans.
-
-## 🚀 One-Command Setup for Code Reviewers
-
-**For code reviewers who want to test the application immediately:**
-
-### **Linux/macOS:**
-```bash
-curl -fsSL https://raw.githubusercontent.com/your-repo/urlscanner/main/setup.sh | bash
-# OR if you have the code locally:
-./setup.sh
-```
-
-### **Windows:**
-```cmd
-setup.bat
-```
-
-### **What the setup script does:**
-- ✅ Checks Docker prerequisites
-- ✅ Generates secure random secrets automatically
-- ✅ Builds and starts all services
-- ✅ Creates a sample user: `reviewer@example.com` / `reviewer123`
-- ✅ Seeds sample URL scan data
-- ✅ Provides ready-to-use curl commands
-
-**After setup completes, the application will be available at: http://localhost:8080**
+A self-service Spring Boot application for scanning URLs for security issues using the urlscan.io API. The system provides JWT-based authentication, asynchronous scan processing, result caching, and a comprehensive REST API for developers to manage their URL scans.
 
 ---
 
-## Prerequisites
+## 🚀 How to Run and Test with Docker
 
-- Docker and Docker Compose (that's it!)
-- (Optional for manual setup) Java 17 or higher, Maven 3.6+
-- (Optional) Kubernetes cluster for production deployment
+This guide provides the essential steps to get the application running locally using Docker and test the end-to-end URL scanning process.
 
-## Manual Setup - Docker Compose
+### Prerequisites
 
-If you prefer manual setup:
+- Docker and Docker Compose
+
+### Step 1: Get Your urlscan.io API Key
+
+This application requires an API key from [urlscan.io](https://urlscan.io/).
+
+1.  Create a free account on [urlscan.io](https://urlscan.io/).
+2.  Go to your **Dashboard** -> **API** page.
+3.  Copy your API key.
+
+### Step 2: Create Your Environment File
+
+Create a `.env` file by copying the provided template. This file will store your API key and other configuration secrets.
 
 ```bash
-# 1. Copy environment template
 cp .env.example .env
-
-# 2. Edit .env with your values (or use defaults for testing)
-
-# 3. Build and start services
-docker-compose up --build -d
 ```
 
-This will start:
-- PostgreSQL database on port 5432
-- URL Scanner application on port 8080
+Now, open the `.env` file and paste your API key into the `URLSCAN_API_KEY` field.
 
-## Running Locally without Docker
+```dotenv
+# .env
 
-### 1. Start PostgreSQL Database
+# ... other settings
 
-First, ensure PostgreSQL is running locally with the following configuration:
-- Database: `urlscanner`
-- Username: `urlscanner`
-- Password: `password`
-- Port: 5432
-
-You can create the database and user:
-```sql
-CREATE DATABASE urlscanner;
-CREATE USER urlscanner WITH ENCRYPTED PASSWORD 'password';
-GRANT ALL PRIVILEGES ON DATABASE urlscanner TO urlscanner;
+# Get your API key from https://urlscan.io/
+URLSCAN_API_KEY=YOUR_API_KEY_HERE
 ```
 
-Run the initialization script:
-```bash
-psql -h localhost -U urlscanner -d urlscanner -f init.sql
-```
+### Step 3: Run the Application with Docker Compose
 
-### 2. Build and Run the Application
+With your `.env` file configured, start the entire application stack with a single command:
 
 ```bash
-# Build the application
-mvn clean install
-
-# Run the application
-mvn spring-boot:run
+docker-compose up --build
 ```
 
-The application will start on port 8080.
+This command will:
+- Build the Spring Boot application Docker image.
+- Start a PostgreSQL database container.
+- Start the URL Scanner application container.
 
-## Authentication
+The application will be available at `http://localhost:8080`.
 
-The application uses JWT-based authentication. All API endpoints (except authentication and health check) require a valid JWT token.
+### Step 4: Test the End-to-End Scanning Flow
 
-### User Registration
+Use the following `curl` commands in your terminal to interact with the API.
+
+**1. Register a New User**
+
 ```bash
 curl -X POST http://localhost:8080/api/auth/register \
   -H "Content-Type: application/json" \
   -d '{
-    "email": "user@example.com",
-    "password": "password123",
-    "firstName": "John",
-    "lastName": "Doe"
+    "email": "developer@example.com",
+    "password": "securepass123",
+    "firstName": "Jane",
+    "lastName": "Developer"
   }'
 ```
 
-### User Login
+**2. Log In and Get Your JWT Token**
+
 ```bash
+# The response will contain your JWT token. Copy it for the next steps.
 curl -X POST http://localhost:8080/api/auth/login \
   -H "Content-Type: application/json" \
-  -d '{
-    "email": "user@example.com",
-    "password": "password123"
-  }'
+  -d '{"email": "developer@example.com", "password": "securepass123"}'
 ```
 
-Both endpoints return a JWT token that must be included in subsequent requests:
-```json
-{
-  "token": "eyJhbGciOiJIUzI1NiJ9...",
-  "userId": 1,
-  "email": "user@example.com",
-  "firstName": "John",
-  "lastName": "Doe"
-}
-```
+**3. Submit a URL for Scanning**
 
-## API Endpoints
+Replace `$TOKEN` with the token you received.
 
-All scan endpoints require authentication. Include the JWT token in the Authorization header:
 ```bash
-Authorization: Bearer <your-jwt-token>
-```
+# Store your token in a variable
+TOKEN="eyJhbGciOiJIUzI1NiJ9..."
 
-**Important**: All scan operations are user-scoped. Users can only view, create, and delete their own scans. The system automatically filters data based on the authenticated user's ID from the JWT token.
-
-### Submit URL for Scanning
-```bash
+# Submit a URL (e.g., example.com)
 curl -X POST http://localhost:8080/api/scans \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <your-jwt-token>" \
+  -H "Authorization: Bearer $TOKEN" \
   -d '{"url": "https://example.com"}'
 ```
 
-**URL Validation**: URLs must start with `http://` or `https://`
+The API will immediately respond with the initial scan record. Note the `id` and the status `SUBMITTED`.
 
-Response:
-```json
-{
-  "id": 1,
-  "url": "https://example.com",
-  "status": "SUBMITTED",
-  "userId": 1,
-  "createdAt": "2024-01-01T10:00:00",
-  "updatedAt": "2024-01-01T10:00:00",
-  "result": null,
-  "externalScanId": null
-}
-```
+**4. Check the Scan Status (Polling)**
 
-### List All User Scans
-Returns only scans belonging to the authenticated user, ordered by creation date (newest first):
+Wait a few seconds for the background worker to pick up the job, then check the scan's status using its ID. You should see the status change to `PROCESSING`.
+
 ```bash
-curl http://localhost:8080/api/scans \
-  -H "Authorization: Bearer <your-jwt-token>"
+# Check the status of scan with ID 1
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/scans/1
 ```
 
-### Get Specific Scan Details
-Returns scan details only if the scan belongs to the authenticated user:
+**5. Get the Final Result**
+
+Wait another 15-30 seconds for the scan to complete. Poll the same endpoint again. The status will change to `DONE`, and the `result` field will be populated with the JSON report from `urlscan.io`.
+
 ```bash
-curl http://localhost:8080/api/scans/1 \
-  -H "Authorization: Bearer <your-jwt-token>"
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/scans/1
 ```
 
-### Delete a Scan
-Deletes a scan only if it belongs to the authenticated user:
-```bash
-curl -X DELETE http://localhost:8080/api/scans/1 \
-  -H "Authorization: Bearer <your-jwt-token>"
-```
+Congratulations! You have successfully tested the entire asynchronous scanning workflow.
 
-Returns `204 No Content` on success, `404 Not Found` if scan doesn't exist or doesn't belong to user.
+---
+
+## API Endpoints
+
+All scan endpoints require authentication (`Authorization: Bearer <your-jwt-token>`).
+
+- `POST /api/scans`: Submit a URL for scanning.
+- `GET /api/scans`: List all scans submitted by the user.
+- `GET /api/scans/{id}`: Return details and results of a specific scan.
+- `DELETE /api/scans/{id}`: Delete a specific scan request and its results.
 
 **Available scan statuses**: `SUBMITTED`, `PROCESSING`, `DONE`, `FAILED`
 
-## Health Check
+## Architecture and Design
 
-The application includes Spring Boot Actuator for health monitoring:
+The system is designed as a classic asynchronous worker architecture to ensure the API remains responsive and resilient.
 
-```bash
-curl http://localhost:8080/actuator/health
-```
+1.  **API Layer (`UrlScanController`)**: A thin, non-blocking layer for authentication, validation, and immediately persisting scan requests with a `SUBMITTED` status.
+2.  **Persistence Layer (PostgreSQL)**: Acts as a reliable queue, decoupling the API from the background workers. This guarantees no requests are lost.
+3.  **Worker Layer (`UrlScanWorker`)**: A stateless background process with two scheduled tasks:
+    *   **Submission Worker**: Polls for `SUBMITTED` scans and sends them to `urlscan.io`.
+    *   **Result Worker**: Polls for `PROCESSING` scans and fetches their results.
+4.  **External Service Client (`UrlScanIoClient`)**: An encapsulated client that handles all communication with the `urlscan.io` API, including rate-limit handling.
 
-## Configuration
+### Fault Tolerance and Rate Limiting
 
-The application can be configured using environment variables:
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DB_HOST` | localhost | PostgreSQL host |
-| `DB_PORT` | 5432 | PostgreSQL port |
-| `DB_NAME` | urlscanner | Database name |
-| `DB_USER` | urlscanner | Database username |
-| `DB_PASSWORD` | password | Database password |
-| `SERVER_PORT` | 8080 | Application server port |
-| `JWT_SECRET` | mySecretKey | JWT signing secret (change in production) |
-| `JWT_EXPIRATION` | 86400000 | JWT token expiration in milliseconds (24 hours) |
+- **Resilience**: Because the workers are stateless and the state is stored in the database, the system is highly fault-tolerant. If a worker dies, a new one will start and pick up the work exactly where the last one left off.
+- **Rate Limiting**: The `UrlScanIoClient` includes a simple retry mechanism. If it receives a `429 Too Many Requests` error, it will pause and retry, preventing the service from being blocked by the external API.
+- **User Experience**: The API feels fast because it responds immediately. The user can poll for status updates without having to wait for the full scan to complete, which is a key principle of good asynchronous design.
 
 ## Development
 
 ### Running Tests
+
 ```bash
 mvn test
 ```
 
-### Building Docker Image
-```bash
-docker build -t urlscanner:latest .
-```
-
 ### Stopping Services
+
 ```bash
 # Stop Docker Compose services
 docker-compose down
 
-# Remove volumes (this will delete database data)
+# Remove volumes (this will delete all database data)
 docker-compose down -v
 ```
-
-## Kubernetes Deployment
-
-For production deployment on Kubernetes:
-
-```bash
-# Apply all Kubernetes manifests
-kubectl apply -f k8s/
-
-# Check deployment status
-kubectl get pods -n urlscanner
-
-# Get service URL (for LoadBalancer)
-kubectl get svc -n urlscanner
-```
-
-To delete the deployment:
-```bash
-kubectl delete -f k8s/
-```
-
-## Project Structure
-
-```
-urlscanner/
-├── src/main/java/com/geeknarrator/urlscanner/
-│   ├── controller/          # REST controllers (Auth, Scans)
-│   ├── entity/             # JPA entities (User, UrlScan)
-│   ├── repository/         # Data repositories
-│   ├── security/           # JWT utilities and security config
-│   ├── service/            # Business logic services
-│   └── UrlScannerApplication.java
-├── src/main/resources/
-│   └── application.yml     # Application configuration
-├── k8s/                    # Kubernetes manifests
-├── docker-compose.yml      # Docker Compose configuration
-├── Dockerfile             # Docker build configuration
-├── init.sql              # Database initialization with user tables
-└── pom.xml               # Maven dependencies with security libs
-```
-
-## System Architecture
-
-The application follows a layered architecture with clear separation of concerns:
-
-- **Controller Layer**: REST endpoints for authentication and scan management
-- **Security Layer**: JWT-based authentication and authorization  
-- **Service Layer**: Business logic for user management and URL scanning
-- **Repository Layer**: Data access using Spring Data JPA
-- **Entity Layer**: JPA entities with proper relationships and constraints
-
-### Security Features
-
-- **JWT Authentication**: Stateless token-based authentication
-- **User Isolation**: All scan operations are automatically scoped to the authenticated user
-- **Password Encryption**: BCrypt hashing for secure password storage
-- **Input Validation**: URL format validation and required field checks
-- **Error Handling**: Global exception handler with meaningful error messages
-- **Database Security**: Foreign key constraints and user-scoped queries
-
-### Database Schema
-
-- **users**: User accounts with encrypted passwords and profile information
-- **url_scans**: URL scan records linked to users with foreign key constraints
-- **Indexes**: Optimized for common queries (user_id, status, created_at, external_scan_id)
-- **User Data Isolation**: Database-level constraints ensure users can only access their own data
-
-### Authentication Flow
-
-1. User registers via `/api/auth/register` or logs in via `/api/auth/login`
-2. Server returns JWT token containing user information
-3. Client includes token in `Authorization: Bearer <token>` header for subsequent requests
-4. `JwtAuthenticationFilter` validates token and sets security context
-5. `SecurityUtils` extracts current user ID from security context
-6. All repository queries automatically filter by user ID for data isolation
-
-## End-to-End Usage Example
-
-Here's a complete workflow showing how to use the API:
-
-```bash
-# 1. Register a new user
-curl -X POST http://localhost:8080/api/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"email": "developer@example.com", "password": "securepass123", "firstName": "Jane", "lastName": "Developer"}'
-
-# Response: {"token": "eyJ...", "userId": 1, "email": "developer@example.com", ...}
-
-# 2. Store the token for subsequent requests
-TOKEN="eyJ..."
-
-# 3. Submit a URL for scanning  
-curl -X POST http://localhost:8080/api/scans \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $TOKEN" \
-  -d '{"url": "https://suspicious-site.com"}'
-
-# Response: {"id": 1, "url": "https://suspicious-site.com", "status": "SUBMITTED", "userId": 1, ...}
-
-# 4. List all your scans
-curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/scans
-
-# 5. Check specific scan details
-curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/scans/1
-
-# 6. Delete a scan when no longer needed
-curl -X DELETE -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/scans/1
-```
-
-## Troubleshooting
-
-### Authentication Issues
-- Ensure JWT token is included in Authorization header with "Bearer " prefix
-- Check token expiration (default 24 hours) - re-login if expired
-- Verify user credentials for login
-- Ensure Content-Type header is set to "application/json" for login/register
-
-### API Access Issues  
-- 404 errors on scans may indicate the scan doesn't exist or belongs to another user
-- Validation errors return 400 with detailed field-level error messages
-- Ensure URLs start with http:// or https://
-
-### Database Connection Issues
-- Ensure PostgreSQL is running and accessible
-- Check database credentials and connection string
-- Verify the database, user, and tables exist
-- Run the init.sql script if tables are missing
-
-### Port Already in Use
-- Change the `SERVER_PORT` environment variable
-- Or stop the service using the port
-
-### Docker Issues
-- Ensure Docker daemon is running
-- Check available disk space
-- Try `docker-compose down` and `docker-compose up --build` again
-
-### Security Considerations for Production
-- Change the default `JWT_SECRET` to a secure, long random string
-- Use environment variables for all sensitive configuration
-- Enable HTTPS in production
-- Consider shorter JWT expiration times for enhanced security
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test locally using Docker Compose
-5. Submit a pull request
