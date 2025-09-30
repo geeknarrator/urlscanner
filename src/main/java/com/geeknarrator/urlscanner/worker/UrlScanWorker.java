@@ -6,12 +6,17 @@ import com.geeknarrator.urlscanner.service.UrlScanIoClient;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Consumer;
 
 @Component
 public class UrlScanWorker {
@@ -22,33 +27,74 @@ public class UrlScanWorker {
     private final UrlScanIoClient urlScanIoClient;
     private final MeterRegistry meterRegistry;
 
+    @Value("${worker.submission.batch-size:100}")
+    private int submissionBatchSize;
+
+    @Value("${worker.result.batch-size:100}")
+    private int resultBatchSize;
+
+    @Value("${worker.fairness.per-user-batch-size:5}")
+    private int perUserBatchSize;
+
     public UrlScanWorker(UrlScanRepository urlScanRepository, UrlScanIoClient urlScanIoClient, MeterRegistry meterRegistry) {
         this.urlScanRepository = urlScanRepository;
         this.urlScanIoClient = urlScanIoClient;
         this.meterRegistry = meterRegistry;
     }
 
-    @Scheduled(fixedDelay = 10000)
+    @Scheduled(fixedDelayString = "${worker.submission.delay-ms:10000}")
     @Transactional
     public void processSubmittedScans() {
-        logger.info("Running worker to process SUBMITTED scans...");
-        List<UrlScan> submittedScans = urlScanRepository.findByStatus(UrlScan.ScanStatus.SUBMITTED);
+        runFairnessWorker(UrlScan.ScanStatus.SUBMITTED, submissionBatchSize, this::processScan);
+    }
 
-        if (submittedScans.isEmpty()) {
-            return;
+    @Scheduled(fixedDelayString = "${worker.result.delay-ms:15000}")
+    @Transactional
+    public void checkProcessingScans() {
+        runFairnessWorker(UrlScan.ScanStatus.PROCESSING, resultBatchSize, this::checkScanResult);
+    }
+
+    private void runFairnessWorker(UrlScan.ScanStatus status, int maxBatchSize, Consumer<UrlScan> processor) {
+        logger.info("Running fairness worker for status: {}", status);
+        int processedCount = 0;
+
+        // --- Phase 1: Fairness Pass (Round-Robin per user) ---
+        List<Long> userIds = urlScanRepository.findDistinctUserIdsWithStatus(status);
+        if (!userIds.isEmpty()) {
+            logger.info("Fairness pass: Found {} users with pending scans.", userIds.size());
+            for (Long userId : userIds) {
+                if (processedCount >= maxBatchSize) {
+                    logger.info("Batch limit reached during fairness pass. Deferring remaining users.");
+                    break;
+                }
+                Pageable perUserPageable = PageRequest.of(0, perUserBatchSize);
+                Page<UrlScan> userScans = urlScanRepository.findAndLockByUserIdAndStatus(userId, status, perUserPageable);
+                for (UrlScan scan : userScans) {
+                    processor.accept(scan);
+                    processedCount++;
+                }
+            }
         }
 
-        logger.info("Found {} SUBMITTED scans to process.", submittedScans.size());
-        for (UrlScan scan : submittedScans) {
-            processScan(scan);
+        // --- Phase 2: Efficiency Pass (Bulk processing for remaining capacity) ---
+        int remainingCapacity = maxBatchSize - processedCount;
+        if (remainingCapacity > 0) {
+            logger.info("Efficiency pass: Fetching up to {} more scans.", remainingCapacity);
+            Pageable bulkPageable = PageRequest.of(0, remainingCapacity);
+            Page<UrlScan> bulkScans = urlScanRepository.findAndLockByStatus(status, bulkPageable);
+            if (!bulkScans.isEmpty()) {
+                logger.info("Found and locked {} additional scans in efficiency pass.", bulkScans.getNumberOfElements());
+                for (UrlScan scan : bulkScans) {
+                    processor.accept(scan);
+                }
+            }
         }
-        logger.info("Finished processing batch of SUBMITTED scans.");
+        logger.info("Finished worker run for status: {}", status);
     }
 
     private void processScan(UrlScan scan) {
         try {
             Optional<String> externalScanIdOpt = urlScanIoClient.submitScan(scan.getUrl());
-
             if (externalScanIdOpt.isPresent()) {
                 scan.setExternalScanId(externalScanIdOpt.get());
                 scan.setStatus(UrlScan.ScanStatus.PROCESSING);
@@ -61,32 +107,13 @@ public class UrlScanWorker {
         }
     }
 
-    @Scheduled(fixedDelay = 15000)
-    @Transactional
-    public void checkProcessingScans() {
-        logger.info("Running worker to check PROCESSING scans...");
-        List<UrlScan> processingScans = urlScanRepository.findByStatus(UrlScan.ScanStatus.PROCESSING);
-
-        if (processingScans.isEmpty()) {
-            return;
-        }
-
-        logger.info("Found {} PROCESSING scans to check.", processingScans.size());
-        for (UrlScan scan : processingScans) {
-            checkScanResult(scan);
-        }
-        logger.info("Finished checking batch of PROCESSING scans.");
-    }
-
     private void checkScanResult(UrlScan scan) {
         if (scan.getExternalScanId() == null || scan.getExternalScanId().isEmpty()) {
             handleFailure(scan, "invalid_state", "Scan is in PROCESSING state but has no external scan ID");
             return;
         }
-
         try {
             Optional<String> resultOpt = urlScanIoClient.getScanResult(scan.getExternalScanId());
-
             if (resultOpt.isPresent()) {
                 scan.setResult(resultOpt.get());
                 scan.setStatus(UrlScan.ScanStatus.DONE);
@@ -96,7 +123,7 @@ public class UrlScanWorker {
                 logger.info("Result for scan ID: {} not yet available.", scan.getId());
             }
         } catch (Exception e) {
-            handleFailure(scan, "result_error", "An unexpected error occurred while checking result for scan: " + e.getMessage(), e);
+            handleFailure(scan, "result_error", "An unexpected error occurred while checking result: " + e.getMessage(), e);
         }
     }
 
@@ -105,7 +132,7 @@ public class UrlScanWorker {
         scan.setStatus(UrlScan.ScanStatus.FAILED);
         scan.setFailureReason(errorMessage);
         if (e.length > 0) {
-            logger.error("Scan ID: {} failed. Reason: {}.", scan.getId(), errorMessage, e[0]);
+            logger.error("Scan ID: {} failed. Reason: {}. Details: {}", scan.getId(), errorMessage, e[0].getMessage());
         } else {
             logger.error("Scan ID: {} failed. Reason: {}.", scan.getId(), errorMessage);
         }

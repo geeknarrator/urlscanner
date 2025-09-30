@@ -1,5 +1,3 @@
-debug: true # Enable auto-configuration report
-
 spring:
   application:
     name: urlscanner
@@ -44,3 +42,16 @@ urlscan:
   cache:
     ttl:
       hours: ${URLSCAN_CACHE_TTL_HOURS:24}
+  client:
+    max-retries: ${URLSCAN_CLIENT_MAX_RETRIES:3}
+    retry-initial-delay-ms: ${URLSCAN_CLIENT_RETRY_DELAY_MS:5000}
+
+worker:
+  submission:
+    delay-ms: ${WORKER_SUBMISSION_DELAY_MS:10000}
+    batch-size: ${WORKER_SUBMISSION_BATCH_SIZE:100}
+  result:
+    delay-ms: ${WORKER_RESULT_DELAY_MS:15000}
+    batch-size: ${WORKER_RESULT_BATCH_SIZE:100}
+  fairness:
+    per-user-batch-size: ${WORKER_FAIRNESS_PER_USER_BATCH_SIZE:5}

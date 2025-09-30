@@ -29,9 +29,11 @@ public class UrlScanIoClient {
     @Value("${urlscan.api.url:https://urlscan.io/api/v1}")
     private String urlscanApiBaseUrl;
 
-    // Simple retry configuration
-    private static final int MAX_RETRIES = 3;
-    private static final long RETRY_DELAY_MS = 5000; // 5 seconds
+    @Value("${urlscan.client.max-retries:3}")
+    private int maxRetries;
+
+    @Value("${urlscan.client.retry-initial-delay-ms:5000}")
+    private long retryInitialDelayMs;
 
     public UrlScanIoClient(RestTemplateBuilder restTemplateBuilder, ObjectMapper objectMapper) {
         this.restTemplate = restTemplateBuilder
@@ -48,7 +50,8 @@ public class UrlScanIoClient {
         Map<String, String> requestBody = Collections.singletonMap("url", url);
         HttpEntity<Map<String, String>> requestEntity = new HttpEntity<>(requestBody, headers);
 
-        for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        long currentDelay = retryInitialDelayMs;
+        for (int attempt = 1; attempt <= maxRetries; attempt++) {
             try {
                 logger.info("Attempt {} to submit scan for URL: {}", attempt, url);
                 ResponseEntity<Map> response = restTemplate.exchange(
@@ -65,10 +68,11 @@ public class UrlScanIoClient {
                 }
             } catch (HttpClientErrorException e) {
                 if (e.getStatusCode() == HttpStatus.TOO_MANY_REQUESTS) {
-                    logger.warn("Rate limit hit for URL: {}. Retrying in {}ms (Attempt {}/{})", url, RETRY_DELAY_MS, attempt, MAX_RETRIES);
-                    if (attempt < MAX_RETRIES) {
+                    if (attempt < maxRetries) {
+                        logger.warn("Rate limit hit for URL: {}. Retrying in {}ms (Attempt {}/{})", url, currentDelay, attempt, maxRetries);
                         try {
-                            Thread.sleep(RETRY_DELAY_MS);
+                            Thread.sleep(currentDelay);
+                            currentDelay *= 2; // Exponential backoff
                         } catch (InterruptedException ie) {
                             Thread.currentThread().interrupt();
                             logger.error("Thread interrupted during retry delay.", ie);
@@ -102,12 +106,10 @@ public class UrlScanIoClient {
             );
 
             if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
-                // Convert the full response map to a JSON string
                 return Optional.of(objectMapper.writeValueAsString(response.getBody()));
             }
         } catch (HttpClientErrorException e) {
             if (e.getStatusCode() == HttpStatus.NOT_FOUND) {
-                // This is expected if the scan is not yet complete. Return empty.
                 logger.info("Scan result for {} not yet available (404).", externalScanId);
                 return Optional.empty();
             }

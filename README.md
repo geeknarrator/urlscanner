@@ -55,70 +55,50 @@ This command will start the following services:
 - **Prometheus**: The metrics collector, available at `http://localhost:9090`.
 - **Grafana**: The visualization dashboard, available at `http://localhost:3000`.
 
-### Step 4: Explore the Grafana Dashboard
+### Step 4: Explore the Interactive API Documentation
 
-Once the services are running, you can immediately view the application's metrics.
+Once the application is running, you can explore and interact with the API using the built-in Swagger UI.
+
+1.  Open your browser and navigate to **http://localhost:8080/swagger-ui.html**.
+2.  You will see a complete, interactive documentation of all available endpoints.
+3.  To test the secured endpoints, first use the `/api/auth/login` endpoint to get a JWT token. Then, click the **Authorize** button at the top of the page and paste your token in the format `Bearer <your-token>`.
+
+### Step 5: View the Grafana Dashboard
 
 1.  Open your browser and navigate to **http://localhost:3000**.
-2.  Log in with the default credentials:
-    -   Username: `admin`
-    -   Password: `admin`
-    (You can skip the password change prompt).
-3.  Navigate to **Dashboards** from the left-hand menu.
-4.  Click on the **URL Scanner Overview** dashboard.
-
-You will see a pre-built dashboard visualizing key metrics like pending scans, scan throughput, cache hits, and failure rates.
-
-### Step 5: Test the End-to-End Scanning Flow
-
-As you use the API, you will see the dashboard update in real-time. Use the following `curl` commands to generate some metrics.
-
-**1. Register and Log In**
-
-```bash
-# Register a new user
-curl -X POST http://localhost:8080/api/auth/register -H "Content-Type: application/json" -d '{"email": "developer@example.com", "password": "securepass123", "firstName": "Jane", "lastName": "Developer"}'
-
-# Log in and get your token
-TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/login -H "Content-Type: application/json" -d '{"email": "developer@example.com", "password": "securepass123"}' | jq -r .token)
-
-echo "Your token is: $TOKEN"
-```
-
-**2. Submit URLs and Watch the Dashboard**
-
-Submit a few URLs for scanning. As you do, watch the "Scan Throughput" and "Pending Scans" panels on your Grafana dashboard.
-
-```bash
-curl -X POST http://localhost:8080/api/scans -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" -d '{"url": "https://google.com"}'
-curl -X POST http://localhost:8080/api/scans -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" -d '{"url": "https://github.com"}'
-```
+2.  Log in with the default credentials: `admin` / `admin`.
+3.  Navigate to **Dashboards** and click on the **URL Scanner Overview** dashboard to see your application's metrics in real-time.
 
 ---
 
-## Observability: The Monitoring Stack
+## Architecture and Design
 
-The project includes a complete, pre-configured monitoring stack to provide insight into the application's performance and health.
+The system is designed as a robust, multi-tenant, asynchronous worker platform.
 
-- **Metrics Exposure**: The Spring Boot application uses **Micrometer** to expose detailed metrics (including custom ones like `scans.completed` and `scans.failed`) at the `/actuator/prometheus` endpoint.
-- **Metrics Collection**: A **Prometheus** service is configured to automatically scrape these metrics every 15 seconds and store them in a time-series database.
-- **Metrics Visualization**: A **Grafana** service is pre-configured with Prometheus as a data source and includes a provisioned **URL Scanner Overview** dashboard to visualize the most important application metrics out of the box.
+1.  **API Layer**: A thin, non-blocking layer for authentication, validation, and immediately persisting scan requests.
+2.  **Persistence Layer (PostgreSQL)**: Acts as a reliable queue, decoupling the API from the background workers.
+3.  **Worker Layer (`UrlScanWorker`)**: A stateless background process that uses a sophisticated **two-phase fairness queueing** model:
+    *   **Fairness Pass**: A round-robin process that gives every user with pending jobs a fair share of the processing resources in each run.
+    *   **Efficiency Pass**: A bulk-fetch process that utilizes the worker's remaining capacity to maximize throughput.
+    *   **Concurrency Safety**: The worker uses pessimistic database locks (`SELECT ... FOR UPDATE SKIP LOCKED`) to ensure that even when scaled to multiple instances, no two workers will ever process the same job.
+4.  **External Service Client (`UrlScanIoClient`)**: An encapsulated client that handles all communication with the `urlscan.io` API, including rate-limit handling with configurable exponential backoff.
 
-## API Endpoints
+## Key Features
 
-All scan endpoints require authentication (`Authorization: Bearer <your-jwt-token>`).
-
-- `POST /api/scans`: Submit a URL for scanning.
-- `GET /api/scans`: List all scans submitted by the user.
-- `GET /api/scans/{id}`: Return details and results of a specific scan.
-- `DELETE /api/scans/{id}`: Delete a specific scan request and its results.
+- **Authentication**: Secure JWT-based authentication with user registration and login.
+- **User Isolation**: All API operations are strictly scoped to the authenticated user.
+- **Scalable & Fair Worker Queue**: The background worker is designed to be both horizontally scalable and fair to all users.
+- **Result Caching**: A two-layer cache minimizes redundant API calls and provides instant results for frequently scanned URLs.
+- **Full Observability**: The application is fully instrumented with custom metrics, which are collected by a pre-configured Prometheus and Grafana stack.
+- **Interactive API Documentation**: A built-in Swagger UI provides comprehensive, interactive documentation for the entire REST API.
+- **Fully Configurable**: All key operational parameters (worker schedules, batch sizes, API client retries, etc.) are exposed as configurable properties.
 
 ## Development
 
 ### Running Tests
 
 ```bash
-mvn test
+mvn clean test
 ```
 
 ### Stopping Services
