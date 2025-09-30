@@ -4,6 +4,8 @@ A self-service Spring Boot application for scanning URLs for security issues usi
 
 This project is fully containerized and includes a complete observability stack with Prometheus and Grafana for monitoring.
 
+![img.png](img.png)
+
 ---
 
 ## 🚀 How to Run and Test with Docker
@@ -114,9 +116,6 @@ urlscanner scan https://github.com
 
 # Check scan status
 urlscanner status 1
-
-# Watch scan until completion (auto-refresh)
-urlscanner watch 1
 
 # List all your scans
 urlscanner list
