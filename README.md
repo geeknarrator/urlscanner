@@ -6,6 +6,10 @@ This project is fully containerized and includes a complete observability stack 
 
 ![img.png](img.png)
 
+User Flow diagram:
+
+![plantuml.png](plantuml.png)
+
 ---
 
 ## 🚀 How to Run and Test with Docker
@@ -257,6 +261,16 @@ If you prefer a graphical interface:
 
 The system is designed as a robust, multi-tenant, asynchronous worker platform.
 
+### System Flow
+
+```
+User → CLI → API → Database → Worker → urlscan.io → Results
+```
+
+**📊 [View Detailed Sequence Diagram](docs/sequence-diagram.puml)** - Shows complete registration, login, and scan submission flow
+
+### Components
+
 1.  **API Layer**: A thin, non-blocking layer for authentication, validation, and immediately persisting scan requests.
 2.  **Persistence Layer (PostgreSQL)**: Acts as a reliable queue, decoupling the API from the background workers.
 3.  **Worker Layer (`UrlScanWorker`)**: A stateless background process that uses a sophisticated **two-phase fairness queueing** model:
@@ -264,6 +278,15 @@ The system is designed as a robust, multi-tenant, asynchronous worker platform.
     *   **Efficiency Pass**: A bulk-fetch process that utilizes the worker's remaining capacity to maximize throughput.
     *   **Concurrency Safety**: The worker uses pessimistic database locks (`SELECT ... FOR UPDATE SKIP LOCKED`) to ensure that even when scaled to multiple instances, no two workers will ever process the same job.
 4.  **External Service Client (`UrlScanIoClient`)**: An encapsulated client that handles all communication with the `urlscan.io` API, including rate-limit handling with configurable exponential backoff.
+
+### Request Flow Example
+
+1. **User registers** → Password hashed with BCrypt → Stored in database
+2. **User logs in** → Credentials verified → JWT token issued (24h expiry)
+3. **User submits scan** → Token validated → Scan saved with status `SUBMITTED`
+4. **Worker (every 10s)** → Fetches `SUBMITTED` scans → Sends to urlscan.io → Updates to `PROCESSING`
+5. **Worker (every 15s)** → Fetches `PROCESSING` scans → Checks results → Updates to `DONE`
+6. **User polls/watches** → Sees status updates in real-time → Gets results when `DONE`
 
 ## Key Features
 

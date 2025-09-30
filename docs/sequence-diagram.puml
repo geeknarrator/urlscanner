@@ -1,0 +1,262 @@
+@startuml URL Scanner - Registration, Login and Scan Flow
+
+!theme plain
+skinparam backgroundColor #FFFFFF
+skinparam handwritten false
+skinparam shadowing false
+skinparam sequenceArrowThickness 2
+skinparam roundcorner 10
+skinparam maxmessagesize 200
+
+actor User
+participant "CLI/Client" as CLI
+participant "AuthController" as Auth
+participant "UserRepository" as UserRepo
+participant "JwtUtil" as JWT
+participant "UrlScanController" as ScanCtrl
+participant "UrlScanRepository" as ScanRepo
+participant "UrlScanWorker\n(Background)" as Worker
+participant "UrlScanIoClient" as External
+database "PostgreSQL" as DB
+
+== User Registration ==
+
+User -> CLI: urlscanner register\nemail@test.com password123
+activate CLI
+
+CLI -> Auth: POST /api/auth/register\n{email, password, firstName, lastName}
+activate Auth
+
+Auth -> Auth: Validate input\n(email format, password length)
+Auth -> Auth: Hash password\n(BCrypt)
+Auth -> UserRepo: save(user)
+activate UserRepo
+UserRepo -> DB: INSERT INTO users
+activate DB
+DB --> UserRepo: User saved
+deactivate DB
+UserRepo --> Auth: User entity
+deactivate UserRepo
+
+Auth --> CLI: 200 OK\n{id, email, firstName, lastName}
+deactivate Auth
+
+CLI --> User: ✓ Registration successful!
+deactivate CLI
+
+== User Login ==
+
+User -> CLI: urlscanner login\nemail@test.com password123
+activate CLI
+
+CLI -> Auth: POST /api/auth/login\n{email, password}
+activate Auth
+
+Auth -> UserRepo: findByEmail(email)
+activate UserRepo
+UserRepo -> DB: SELECT * FROM users WHERE email=?
+activate DB
+DB --> UserRepo: User record
+deactivate DB
+UserRepo --> Auth: Optional<User>
+deactivate UserRepo
+
+Auth -> Auth: Verify password\n(BCrypt.matches)
+
+alt Password valid
+    Auth -> JWT: generateToken(email)
+    activate JWT
+    JWT -> JWT: Create JWT with\nHS256 algorithm\n(exp: 24 hours)
+    JWT --> Auth: token string
+    deactivate JWT
+
+    Auth --> CLI: 200 OK\n{token, email}
+    CLI -> CLI: Save token to\n~/.urlscanner_token
+    CLI --> User: ✓ Login successful!\nToken saved
+else Password invalid
+    Auth --> CLI: 401 Unauthorized\n{error: "Invalid credentials"}
+    CLI --> User: ✗ Login failed
+end
+deactivate Auth
+deactivate CLI
+
+== Submit URL Scan ==
+
+User -> CLI: urlscanner scan\nhttps://example.com
+activate CLI
+
+CLI -> CLI: Load token from\n~/.urlscanner_token
+
+CLI -> ScanCtrl: POST /api/scans\nAuthorization: Bearer <token>\n{url: "https://example.com"}
+activate ScanCtrl
+
+ScanCtrl -> JWT: validateToken(token)
+activate JWT
+JWT -> JWT: Verify signature\nCheck expiration
+JWT --> ScanCtrl: Valid (returns email)
+deactivate JWT
+
+ScanCtrl -> ScanCtrl: Extract user from\nSecurityContext
+
+ScanCtrl -> ScanRepo: Check if URL already scanned\n(cache check)
+activate ScanRepo
+ScanRepo -> DB: SELECT * FROM url_scans\nWHERE url=? AND user_id=?\nAND status IN ('PROCESSING', 'DONE')
+activate DB
+DB --> ScanRepo: Existing scan (if any)
+deactivate DB
+deactivate ScanRepo
+
+alt URL already scanned recently
+    ScanCtrl --> CLI: 200 OK\n{cached scan result}
+    note right: Return cached result\n(deduplication)
+else New scan or expired cache
+    ScanCtrl -> ScanCtrl: Create UrlScan entity\nstatus=SUBMITTED
+
+    ScanCtrl -> ScanRepo: save(urlScan)
+    activate ScanRepo
+    ScanRepo -> DB: INSERT INTO url_scans\n(url, user_id, status='SUBMITTED')
+    activate DB
+    DB --> ScanRepo: Scan ID generated
+    deactivate DB
+    ScanRepo --> ScanCtrl: UrlScan entity
+    deactivate ScanRepo
+
+    ScanCtrl --> CLI: 201 Created\n{id, url, scanStatus: "SUBMITTED"}
+end
+deactivate ScanCtrl
+
+CLI --> User: ✓ Scan submitted! (ID: 1)\nCheck status with:\nurlscanner watch 1
+deactivate CLI
+
+== Background Processing (Async) ==
+
+note over Worker: Scheduled task runs\nevery 10 seconds
+
+Worker -> Worker: @Scheduled trigger\nprocessSubmittedScans()
+activate Worker
+
+Worker -> ScanRepo: findAndLockByStatus\n(SUBMITTED)\nFOR UPDATE SKIP LOCKED
+activate ScanRepo
+ScanRepo -> DB: SELECT * FROM url_scans\nWHERE status='SUBMITTED'\nFOR UPDATE SKIP LOCKED
+activate DB
+DB --> ScanRepo: Locked scan records
+deactivate DB
+ScanRepo --> Worker: List<UrlScan>
+deactivate ScanRepo
+
+loop For each submitted scan
+    Worker -> External: POST https://urlscan.io/api/v1/scan\n{url: "https://example.com"}
+    activate External
+    External --> Worker: 200 OK\n{uuid: "abc123", message: "Submission successful"}
+    deactivate External
+
+    Worker -> Worker: Update scan:\nexternalScanId="abc123"\nstatus=PROCESSING
+
+    Worker -> ScanRepo: save(urlScan)
+    activate ScanRepo
+    ScanRepo -> DB: UPDATE url_scans\nSET status='PROCESSING',\nexternal_scan_id='abc123'
+    activate DB
+    DB --> ScanRepo: Updated
+    deactivate DB
+    deactivate ScanRepo
+end
+
+deactivate Worker
+
+note over Worker: Another scheduled task\nruns every 15 seconds
+
+Worker -> Worker: @Scheduled trigger\ncheckProcessingScans()
+activate Worker
+
+Worker -> ScanRepo: findAndLockByStatus\n(PROCESSING)
+activate ScanRepo
+ScanRepo -> DB: SELECT * FROM url_scans\nWHERE status='PROCESSING'\nFOR UPDATE SKIP LOCKED
+activate DB
+DB --> ScanRepo: Locked scan records
+deactivate DB
+ScanRepo --> Worker: List<UrlScan>
+deactivate ScanRepo
+
+loop For each processing scan
+    Worker -> External: GET https://urlscan.io/api/v1/result/{uuid}
+    activate External
+
+    alt Scan complete
+        External --> Worker: 200 OK\n{scan results, screenshot, etc.}
+
+        Worker -> Worker: Update scan:\nresult=<json>\nstatus=DONE
+
+        Worker -> ScanRepo: save(urlScan)
+        activate ScanRepo
+        ScanRepo -> DB: UPDATE url_scans\nSET status='DONE',\nresult=<json>
+        activate DB
+        DB --> ScanRepo: Updated
+        deactivate DB
+        deactivate ScanRepo
+
+    else Scan still processing
+        External --> Worker: 404 Not Found\n(scan still in progress)
+        note right: Keep status as\nPROCESSING\nwill check again\nin 15 seconds
+
+    else Scan failed
+        External --> Worker: 400/500 Error
+        Worker -> Worker: Update scan:\nstatus=FAILED\nfailureReason=<error>
+        Worker -> ScanRepo: save(urlScan)
+        activate ScanRepo
+        ScanRepo -> DB: UPDATE url_scans\nSET status='FAILED'
+        activate DB
+        DB --> ScanRepo: Updated
+        deactivate DB
+        deactivate ScanRepo
+    end
+    deactivate External
+end
+
+deactivate Worker
+
+== User Checks Scan Status ==
+
+User -> CLI: urlscanner watch 1
+activate CLI
+
+loop Poll every 2 seconds until complete
+    CLI -> ScanCtrl: GET /api/scans/1\nAuthorization: Bearer <token>
+    activate ScanCtrl
+
+    ScanCtrl -> JWT: validateToken(token)
+    activate JWT
+    JWT --> ScanCtrl: Valid
+    deactivate JWT
+
+    ScanCtrl -> ScanRepo: findById(1)
+    activate ScanRepo
+    ScanRepo -> DB: SELECT * FROM url_scans WHERE id=1
+    activate DB
+    DB --> ScanRepo: UrlScan entity
+    deactivate DB
+    ScanRepo --> ScanCtrl: UrlScan
+    deactivate ScanRepo
+
+    ScanCtrl -> ScanCtrl: Verify ownership\n(user_id matches)
+
+    ScanCtrl --> CLI: 200 OK\n{id, url, scanStatus, result}
+    deactivate ScanCtrl
+
+    alt Status = SUBMITTED
+        CLI --> User: ⏳ Status: SUBMITTED\n(waiting in queue...)
+    else Status = PROCESSING
+        CLI --> User: ⚙️ Status: PROCESSING\n(scanning...)
+    else Status = DONE
+        CLI --> User: ✓ Status: DONE\n{full scan results}
+        note right: Exit watch loop
+    else Status = FAILED
+        CLI --> User: ✗ Status: FAILED\n{failure reason}
+        note right: Exit watch loop
+    end
+
+    CLI -> CLI: sleep 2 seconds
+end
+
+deactivate CLI
+
+@enduml
