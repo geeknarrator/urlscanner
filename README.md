@@ -13,6 +13,8 @@ This guide provides the essential steps to get the application and its monitorin
 ### Prerequisites
 
 - Docker and Docker Compose
+- Java 17 or higher (for local development and testing)
+- Maven 3.6+ (for building and running tests)
 
 ### Step 1: Get Your urlscan.io API Key
 
@@ -59,9 +61,9 @@ This command will start the following services:
 
 Once the application is running, you can explore and interact with the API using the built-in Swagger UI.
 
-1.  Open your browser and navigate to **http://localhost:8080/swagger-ui.html**.
+1.  Open your browser and navigate to **http://localhost:8080/swagger-ui/index.html**.
 2.  You will see a complete, interactive documentation of all available endpoints.
-3.  To test the secured endpoints, first use the `/api/auth/login` endpoint to get a JWT token. Then, click the **Authorize** button at the top of the page and paste your token in the format `Bearer <your-token>`.
+3.  To test the secured endpoints, first register a user at `/api/auth/register`, then use the `/api/auth/login` endpoint to get a JWT token. Then, click the **Authorize** button at the top of the page and paste your token in the format `Bearer <your-token>`.
 
 ### Step 5: View the Grafana Dashboard
 
@@ -97,9 +99,17 @@ The system is designed as a robust, multi-tenant, asynchronous worker platform.
 
 ### Running Tests
 
+The project includes comprehensive unit and integration tests. Integration tests use Testcontainers, which requires Docker to be running.
+
 ```bash
+# Ensure Docker is running
 mvn clean test
 ```
+
+The test suite includes:
+- **Unit Tests**: Controller and service layer tests with mocked dependencies
+- **Integration Tests**: Full application context tests with PostgreSQL container
+- **Repository Tests**: JPA repository tests with real database interactions
 
 ### Stopping Services
 
