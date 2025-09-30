@@ -31,14 +31,20 @@ public interface UrlScanRepository extends JpaRepository<UrlScan, Long> {
     Optional<UrlScan> findByExternalScanId(String externalScanId);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @QueryHints({@QueryHint(name = "jakarta.persistence.lock.timeout", value = "-2")}) // SKIP LOCKED
+    @QueryHints({
+        @QueryHint(name = "jakarta.persistence.lock.timeout", value = "0"),
+        @QueryHint(name = "jakarta.persistence.lock.scope", value = "SKIP_LOCKED")
+    })
     Page<UrlScan> findAndLockByStatus(UrlScan.ScanStatus status, Pageable pageable);
 
     @Query("SELECT DISTINCT u.userId FROM UrlScan u WHERE u.status = :status")
     List<Long> findDistinctUserIdsWithStatus(UrlScan.ScanStatus status);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @QueryHints({@QueryHint(name = "jakarta.persistence.lock.timeout", value = "-2")}) // SKIP LOCKED
+    @QueryHints({
+        @QueryHint(name = "jakarta.persistence.lock.timeout", value = "0"),
+        @QueryHint(name = "jakarta.persistence.lock.scope", value = "SKIP_LOCKED")
+    })
     Page<UrlScan> findAndLockByUserIdAndStatus(Long userId, UrlScan.ScanStatus status, Pageable pageable);
 
     List<UrlScan> findByStatus(UrlScan.ScanStatus status);

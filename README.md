@@ -21,10 +21,10 @@ This guide provides the essential steps to get the application and its monitorin
 This application requires an API key from [urlscan.io](https://urlscan.io/).
 
 1.  Create a free account on [urlscan.io](https://urlscan.io/).
-2.  Go to your **Dashboard** -> **API** page.
+2.  Go to your **Dashboard** -> User Profile -> Settings & API -> New **API** key page.
 3.  Copy your API key.
 
-### Step 2: Setup Configuration & Secrets
+### Step 2: Setup Configuration & Secrets (in the repository)
 
 #### Create Your Environment File
 
@@ -47,7 +47,7 @@ URLSCAN_API_KEY=your-actual-api-key-here
 # Generate a strong random key (copy the output)
 openssl rand -base64 64
 ```
-Then paste it in your `.env`:
+Then paste it in your `.env` (make sure it is in a single line):
 ```dotenv
 JWT_SECRET=paste-the-generated-key-here
 ```
@@ -77,7 +77,7 @@ This command will start the following services:
 - **URL Scanner App**: The main application, available at `http://localhost:8080`.
 - **PostgreSQL**: The database for the application.
 - **Prometheus**: The metrics collector, available at `http://localhost:9090`.
-- **Grafana**: The visualization dashboard, available at `http://localhost:3000`.
+- **Grafana**: The visualization dashboard, available at `http://localhost:3000` under dashboards http://localhost:3000/d/urlscanner-overview/url-scanner-overview.
 
 ### Step 4: Test the API
 

@@ -332,6 +332,26 @@ watch_scan() {
     print_info "Watching scan ID: $scan_id (press Ctrl+C to stop)..."
     echo ""
 
+    # First check to see current status
+    response=$(curl -s -w "\n%{http_code}" -X GET "$API_BASE_URL/api/scans/$scan_id" \
+        -H "Authorization: Bearer $token")
+
+    http_code=$(echo "$response" | tail -n1)
+    body=$(echo "$response" | sed '$d')
+
+    if [ "$http_code" -ne 200 ]; then
+        print_error "Failed to fetch scan status (HTTP $http_code)"
+        echo "$body" | jq '.' 2>/dev/null || echo "$body"
+        exit 1
+    fi
+
+    # Show initial status
+    initial_status=$(echo "$body" | jq -r '.scanStatus')
+    url=$(echo "$body" | jq -r '.url')
+    print_info "Initial status: $initial_status"
+    print_info "URL: $url"
+    echo ""
+
     while true; do
         response=$(curl -s -w "\n%{http_code}" -X GET "$API_BASE_URL/api/scans/$scan_id" \
             -H "Authorization: Bearer $token")
@@ -345,27 +365,30 @@ watch_scan() {
 
             case "$scan_status" in
                 "SUBMITTED")
-                    echo -ne "\r⏳ $url - Status: SUBMITTED (waiting in queue...)    "
+                    printf "\r⏳ Status: SUBMITTED (waiting in queue...)    "
                     ;;
                 "PROCESSING")
-                    echo -ne "\r⚙️  $url - Status: PROCESSING (scanning...)         "
+                    printf "\r⚙️  Status: PROCESSING (scanning...)         "
                     ;;
                 "DONE")
-                    echo -e "\r✓ $url - Status: DONE (completed!)                   "
+                    printf "\r✓ Status: DONE (completed!)                   \n\n"
+                    print_success "Scan completed successfully!"
                     echo ""
                     echo "$body" | jq '.'
                     break
                     ;;
                 "FAILED")
-                    echo -e "\r✗ $url - Status: FAILED                              "
-                    echo ""
+                    printf "\r✗ Status: FAILED                              \n\n"
                     failure_reason=$(echo "$body" | jq -r '.failureReason // "Unknown"')
-                    print_error "Failure reason: $failure_reason"
+                    print_error "Scan failed! Reason: $failure_reason"
+                    echo ""
+                    echo "$body" | jq '.'
                     break
                     ;;
             esac
         else
-            print_error "\nFailed to fetch scan status"
+            printf "\n"
+            print_error "Failed to fetch scan status (HTTP $http_code)"
             break
         fi
 
