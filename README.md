@@ -2,11 +2,13 @@
 
 A self-service Spring Boot application for scanning URLs for security issues using the urlscan.io API. The system provides JWT-based authentication, asynchronous scan processing, result caching, and a comprehensive REST API for developers to manage their URL scans.
 
+This project is fully containerized and includes a complete observability stack with Prometheus and Grafana for monitoring.
+
 ---
 
 ## 🚀 How to Run and Test with Docker
 
-This guide provides the essential steps to get the application running locally using Docker and test the end-to-end URL scanning process.
+This guide provides the essential steps to get the application and its monitoring stack running locally using Docker.
 
 ### Prerequisites
 
@@ -39,84 +41,68 @@ Now, open the `.env` file and paste your API key into the `URLSCAN_API_KEY` fiel
 URLSCAN_API_KEY=YOUR_API_KEY_HERE
 ```
 
-### Step 3: Run the Application with Docker Compose
+### Step 3: Run the Entire Stack
 
-With your `.env` file configured, start the entire application stack with a single command:
+With your `.env` file configured, start the entire application and monitoring stack with a single command:
 
 ```bash
 docker-compose up --build
 ```
 
-This command will:
-- Build the Spring Boot application Docker image.
-- Start a PostgreSQL database container.
-- Start the URL Scanner application container.
+This command will start the following services:
+- **URL Scanner App**: The main application, available at `http://localhost:8080`.
+- **PostgreSQL**: The database for the application.
+- **Prometheus**: The metrics collector, available at `http://localhost:9090`.
+- **Grafana**: The visualization dashboard, available at `http://localhost:3000`.
 
-The application will be available at `http://localhost:8080`.
+### Step 4: Explore the Grafana Dashboard
 
-### Step 4: Test the End-to-End Scanning Flow
+Once the services are running, you can immediately view the application's metrics.
 
-Use the following `curl` commands in your terminal to interact with the API.
+1.  Open your browser and navigate to **http://localhost:3000**.
+2.  Log in with the default credentials:
+    -   Username: `admin`
+    -   Password: `admin`
+    (You can skip the password change prompt).
+3.  Navigate to **Dashboards** from the left-hand menu.
+4.  Click on the **URL Scanner Overview** dashboard.
 
-**1. Register a New User**
+You will see a pre-built dashboard visualizing key metrics like pending scans, scan throughput, cache hits, and failure rates.
 
-```bash
-curl -X POST http://localhost:8080/api/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{
-    "email": "developer@example.com",
-    "password": "securepass123",
-    "firstName": "Jane",
-    "lastName": "Developer"
-  }'
-```
+### Step 5: Test the End-to-End Scanning Flow
 
-**2. Log In and Get Your JWT Token**
+As you use the API, you will see the dashboard update in real-time. Use the following `curl` commands to generate some metrics.
 
-```bash
-# The response will contain your JWT token. Copy it for the next steps.
-curl -X POST http://localhost:8080/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email": "developer@example.com", "password": "securepass123"}'
-```
-
-**3. Submit a URL for Scanning**
-
-Replace `$TOKEN` with the token you received.
+**1. Register and Log In**
 
 ```bash
-# Store your token in a variable
-TOKEN="eyJhbGciOiJIUzI1NiJ9..."
+# Register a new user
+curl -X POST http://localhost:8080/api/auth/register -H "Content-Type: application/json" -d '{"email": "developer@example.com", "password": "securepass123", "firstName": "Jane", "lastName": "Developer"}'
 
-# Submit a URL (e.g., example.com)
-curl -X POST http://localhost:8080/api/scans \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $TOKEN" \
-  -d '{"url": "https://example.com"}'
+# Log in and get your token
+TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/login -H "Content-Type: application/json" -d '{"email": "developer@example.com", "password": "securepass123"}' | jq -r .token)
+
+echo "Your token is: $TOKEN"
 ```
 
-The API will immediately respond with the initial scan record. Note the `id` and the status `SUBMITTED`.
+**2. Submit URLs and Watch the Dashboard**
 
-**4. Check the Scan Status (Polling)**
-
-Wait a few seconds for the background worker to pick up the job, then check the scan's status using its ID. You should see the status change to `PROCESSING`.
+Submit a few URLs for scanning. As you do, watch the "Scan Throughput" and "Pending Scans" panels on your Grafana dashboard.
 
 ```bash
-# Check the status of scan with ID 1
-curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/scans/1
+curl -X POST http://localhost:8080/api/scans -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" -d '{"url": "https://google.com"}'
+curl -X POST http://localhost:8080/api/scans -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" -d '{"url": "https://github.com"}'
 ```
-
-**5. Get the Final Result**
-
-Wait another 15-30 seconds for the scan to complete. Poll the same endpoint again. The status will change to `DONE`, and the `result` field will be populated with the JSON report from `urlscan.io`.
-
-```bash
-curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/scans/1
-```
-
-Congratulations! You have successfully tested the entire asynchronous scanning workflow.
 
 ---
+
+## Observability: The Monitoring Stack
+
+The project includes a complete, pre-configured monitoring stack to provide insight into the application's performance and health.
+
+- **Metrics Exposure**: The Spring Boot application uses **Micrometer** to expose detailed metrics (including custom ones like `scans.completed` and `scans.failed`) at the `/actuator/prometheus` endpoint.
+- **Metrics Collection**: A **Prometheus** service is configured to automatically scrape these metrics every 15 seconds and store them in a time-series database.
+- **Metrics Visualization**: A **Grafana** service is pre-configured with Prometheus as a data source and includes a provisioned **URL Scanner Overview** dashboard to visualize the most important application metrics out of the box.
 
 ## API Endpoints
 
@@ -126,25 +112,6 @@ All scan endpoints require authentication (`Authorization: Bearer <your-jwt-toke
 - `GET /api/scans`: List all scans submitted by the user.
 - `GET /api/scans/{id}`: Return details and results of a specific scan.
 - `DELETE /api/scans/{id}`: Delete a specific scan request and its results.
-
-**Available scan statuses**: `SUBMITTED`, `PROCESSING`, `DONE`, `FAILED`
-
-## Architecture and Design
-
-The system is designed as a classic asynchronous worker architecture to ensure the API remains responsive and resilient.
-
-1.  **API Layer (`UrlScanController`)**: A thin, non-blocking layer for authentication, validation, and immediately persisting scan requests with a `SUBMITTED` status.
-2.  **Persistence Layer (PostgreSQL)**: Acts as a reliable queue, decoupling the API from the background workers. This guarantees no requests are lost.
-3.  **Worker Layer (`UrlScanWorker`)**: A stateless background process with two scheduled tasks:
-    *   **Submission Worker**: Polls for `SUBMITTED` scans and sends them to `urlscan.io`.
-    *   **Result Worker**: Polls for `PROCESSING` scans and fetches their results.
-4.  **External Service Client (`UrlScanIoClient`)**: An encapsulated client that handles all communication with the `urlscan.io` API, including rate-limit handling.
-
-### Fault Tolerance and Rate Limiting
-
-- **Resilience**: Because the workers are stateless and the state is stored in the database, the system is highly fault-tolerant. If a worker dies, a new one will start and pick up the work exactly where the last one left off.
-- **Rate Limiting**: The `UrlScanIoClient` includes a simple retry mechanism. If it receives a `429 Too Many Requests` error, it will pause and retry, preventing the service from being blocked by the external API.
-- **User Experience**: The API feels fast because it responds immediately. The user can poll for status updates without having to wait for the full scan to complete, which is a key principle of good asynchronous design.
 
 ## Development
 
@@ -157,9 +124,9 @@ mvn test
 ### Stopping Services
 
 ```bash
-# Stop Docker Compose services
+# Stop all Docker Compose services
 docker-compose down
 
-# Remove volumes (this will delete all database data)
+# Stop services and remove all data volumes
 docker-compose down -v
 ```

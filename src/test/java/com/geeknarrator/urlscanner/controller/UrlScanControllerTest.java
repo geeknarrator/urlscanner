@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.geeknarrator.urlscanner.entity.UrlScan;
 import com.geeknarrator.urlscanner.repository.UrlScanRepository;
 import com.geeknarrator.urlscanner.security.SecurityUtils;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -45,6 +47,10 @@ class UrlScanControllerTest {
 
     @BeforeEach
     void setUp() {
+        // Provide a simple MeterRegistry for the unit test
+        MeterRegistry meterRegistry = new SimpleMeterRegistry();
+        urlScanController = new UrlScanController(urlScanRepository, meterRegistry);
+
         mockMvc = MockMvcBuilders.standaloneSetup(urlScanController)
                 .setCustomArgumentResolvers(new PageableHandlerMethodArgumentResolver())
                 .build();
@@ -62,6 +68,8 @@ class UrlScanControllerTest {
 
         try (MockedStatic<SecurityUtils> securityUtils = mockStatic(SecurityUtils.class)) {
             securityUtils.when(SecurityUtils::getCurrentUserId).thenReturn(1L);
+            when(urlScanRepository.findFirstByUserIdAndUrlAndCreatedAtAfterOrderByCreatedAtDesc(any(), any(), any())).thenReturn(Optional.empty());
+            when(urlScanRepository.findFirstByUrlAndStatusAndCreatedAtAfterOrderByCreatedAtDesc(any(), any(), any())).thenReturn(Optional.empty());
             when(urlScanRepository.save(any(UrlScan.class))).thenReturn(savedScan);
 
             // When & Then

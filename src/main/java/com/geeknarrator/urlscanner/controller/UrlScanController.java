@@ -3,10 +3,10 @@ package com.geeknarrator.urlscanner.controller;
 import com.geeknarrator.urlscanner.entity.UrlScan;
 import com.geeknarrator.urlscanner.repository.UrlScanRepository;
 import com.geeknarrator.urlscanner.security.SecurityUtils;
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -20,51 +20,52 @@ import java.util.Optional;
 @RequestMapping("/api/scans")
 public class UrlScanController {
 
-    @Autowired
-    private UrlScanRepository urlScanRepository;
+    private final UrlScanRepository urlScanRepository;
+    private final MeterRegistry meterRegistry;
 
     @Value("${urlscan.cache.ttl.hours:24}")
     private int cacheTtlHours;
+
+    public UrlScanController(UrlScanRepository urlScanRepository, MeterRegistry meterRegistry) {
+        this.urlScanRepository = urlScanRepository;
+        this.meterRegistry = meterRegistry;
+    }
 
     @PostMapping
     public ResponseEntity<UrlScan> createScan(@Valid @RequestBody CreateScanRequest request) {
         Long userId = SecurityUtils.getCurrentUserId();
         LocalDateTime since = LocalDateTime.now().minusHours(cacheTtlHours);
 
-        // --- Step 1: User-level Deduplication ---
-        // Check if the current user already has a recent scan for this exact URL.
+        // Step 1: User-level Deduplication
         Optional<UrlScan> userExistingScan = urlScanRepository.findFirstByUserIdAndUrlAndCreatedAtAfterOrderByCreatedAtDesc(
                 userId,
                 request.getUrl(),
                 since
         );
-
         if (userExistingScan.isPresent()) {
-            // If the user already has a recent scan, just return it to prevent duplicates.
+            meterRegistry.counter("scans.cache.hit", "type", "user").increment();
             return ResponseEntity.ok(userExistingScan.get());
         }
 
-        // --- Step 2: Global Cache Check ---
-        // Check for a recent, completed scan from *any* user to use as a cache.
+        // Step 2: Global Cache Check
         Optional<UrlScan> globalCachedScan = urlScanRepository.findFirstByUrlAndStatusAndCreatedAtAfterOrderByCreatedAtDesc(
                 request.getUrl(),
                 UrlScan.ScanStatus.DONE,
                 since
         );
-
         if (globalCachedScan.isPresent()) {
-            // Cache hit: Create a new scan record for this user with the cached result.
+            meterRegistry.counter("scans.cache.hit", "type", "global").increment();
             UrlScan scanFromCache = globalCachedScan.get();
             UrlScan newScan = new UrlScan(request.getUrl(), userId);
-            newScan.setStatus(UrlScan.ScanStatus.DONE); // Instantly done
-            newScan.setResult(scanFromCache.getResult()); // Copy the result
-            newScan.setExternalScanId(scanFromCache.getExternalScanId()); // Copy the external ID
+            newScan.setStatus(UrlScan.ScanStatus.DONE);
+            newScan.setResult(scanFromCache.getResult());
+            newScan.setExternalScanId(scanFromCache.getExternalScanId());
             UrlScan savedScan = urlScanRepository.save(newScan);
             return ResponseEntity.ok(savedScan);
         }
 
-        // --- Step 3: New Submission ---
-        // Cache miss: Create a new scan to be processed by the worker.
+        // Step 3: New Submission (Cache Miss)
+        meterRegistry.counter("scans.submitted", "type", "new").increment();
         UrlScan newScan = new UrlScan(request.getUrl(), userId);
         UrlScan savedScan = urlScanRepository.save(newScan);
         return ResponseEntity.ok(savedScan);

@@ -3,9 +3,9 @@ package com.geeknarrator.urlscanner.worker;
 import com.geeknarrator.urlscanner.entity.UrlScan;
 import com.geeknarrator.urlscanner.repository.UrlScanRepository;
 import com.geeknarrator.urlscanner.service.UrlScanIoClient;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -18,16 +18,17 @@ public class UrlScanWorker {
 
     private static final Logger logger = LoggerFactory.getLogger(UrlScanWorker.class);
 
-    @Autowired
-    private UrlScanRepository urlScanRepository;
+    private final UrlScanRepository urlScanRepository;
+    private final UrlScanIoClient urlScanIoClient;
+    private final MeterRegistry meterRegistry;
 
-    @Autowired
-    private UrlScanIoClient urlScanIoClient;
+    public UrlScanWorker(UrlScanRepository urlScanRepository, UrlScanIoClient urlScanIoClient, MeterRegistry meterRegistry) {
+        this.urlScanRepository = urlScanRepository;
+        this.urlScanIoClient = urlScanIoClient;
+        this.meterRegistry = meterRegistry;
+    }
 
-    /**
-     * Periodically fetches submitted scans and sends them to urlscan.io.
-     */
-    @Scheduled(fixedDelay = 10000) // Run every 10 seconds
+    @Scheduled(fixedDelay = 10000)
     @Transactional
     public void processSubmittedScans() {
         logger.info("Running worker to process SUBMITTED scans...");
@@ -46,7 +47,6 @@ public class UrlScanWorker {
 
     private void processScan(UrlScan scan) {
         try {
-            logger.info("Processing scan ID: {} for URL: {}", scan.getId(), scan.getUrl());
             Optional<String> externalScanIdOpt = urlScanIoClient.submitScan(scan.getUrl());
 
             if (externalScanIdOpt.isPresent()) {
@@ -54,20 +54,14 @@ public class UrlScanWorker {
                 scan.setStatus(UrlScan.ScanStatus.PROCESSING);
                 logger.info("Scan ID: {} successfully submitted. External ID: {}", scan.getId(), externalScanIdOpt.get());
             } else {
-                scan.setStatus(UrlScan.ScanStatus.FAILED);
-                logger.error("Failed to submit scan ID: {} to urlscan.io", scan.getId());
+                handleFailure(scan, "submission_error", "Failed to submit scan to urlscan.io");
             }
         } catch (Exception e) {
-            scan.setStatus(UrlScan.ScanStatus.FAILED);
-            logger.error("An unexpected error occurred while processing scan ID: {}", scan.getId(), e);
+            handleFailure(scan, "submission_error", "An unexpected error occurred while submitting scan: " + e.getMessage(), e);
         }
-        // The transaction will commit the changes to the scan object
     }
 
-    /**
-     * Periodically checks for the results of scans that are in progress.
-     */
-    @Scheduled(fixedDelay = 15000) // Run every 15 seconds
+    @Scheduled(fixedDelay = 15000)
     @Transactional
     public void checkProcessingScans() {
         logger.info("Running worker to check PROCESSING scans...");
@@ -86,27 +80,34 @@ public class UrlScanWorker {
 
     private void checkScanResult(UrlScan scan) {
         if (scan.getExternalScanId() == null || scan.getExternalScanId().isEmpty()) {
-            logger.error("Scan ID: {} is in PROCESSING state but has no external scan ID. Marking as FAILED.", scan.getId());
-            scan.setStatus(UrlScan.ScanStatus.FAILED);
+            handleFailure(scan, "invalid_state", "Scan is in PROCESSING state but has no external scan ID");
             return;
         }
 
         try {
-            logger.info("Checking result for scan ID: {} (External ID: {})", scan.getId(), scan.getExternalScanId());
             Optional<String> resultOpt = urlScanIoClient.getScanResult(scan.getExternalScanId());
 
             if (resultOpt.isPresent()) {
                 scan.setResult(resultOpt.get());
                 scan.setStatus(UrlScan.ScanStatus.DONE);
+                meterRegistry.counter("scans.completed").increment();
                 logger.info("Successfully fetched result for scan ID: {}. Status set to DONE.", scan.getId());
             } else {
-                // Result is not ready yet, do nothing and wait for the next worker run.
                 logger.info("Result for scan ID: {} not yet available.", scan.getId());
             }
         } catch (Exception e) {
-            scan.setStatus(UrlScan.ScanStatus.FAILED);
-            logger.error("An unexpected error occurred while checking result for scan ID: {}", scan.getId(), e);
+            handleFailure(scan, "result_error", "An unexpected error occurred while checking result for scan: " + e.getMessage(), e);
         }
-        // The transaction will commit the changes to the scan object
+    }
+
+    private void handleFailure(UrlScan scan, String reasonCode, String errorMessage, Exception... e) {
+        meterRegistry.counter("scans.failed", "reason", reasonCode).increment();
+        scan.setStatus(UrlScan.ScanStatus.FAILED);
+        scan.setFailureReason(errorMessage);
+        if (e.length > 0) {
+            logger.error("Scan ID: {} failed. Reason: {}.", scan.getId(), errorMessage, e[0]);
+        } else {
+            logger.error("Scan ID: {} failed. Reason: {}.", scan.getId(), errorMessage);
+        }
     }
 }

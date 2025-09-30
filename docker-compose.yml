@@ -15,8 +15,13 @@ services:
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
       - urlscanner-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-urlscanner} -d ${DB_NAME:-urlscanner}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  app:
+  urlscanner-app:
     build: .
     container_name: urlscanner-app
     ports:
@@ -32,14 +37,55 @@ services:
       JWT_EXPIRATION: ${JWT_EXPIRATION:-86400000}
       URLSCAN_API_KEY: ${URLSCAN_API_KEY}
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-docker}
+      # Force exposure of the prometheus endpoint to override any other configuration
+      MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: health,info,metrics,prometheus
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     networks:
       - urlscanner-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: urlscanner-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    networks:
+      - urlscanner-network
+    depends_on:
+      urlscanner-app:
+        condition: service_healthy
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana-oss:latest
+    container_name: urlscanner-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_PUBLIC_DASHBOARDS_ENABLED: 'false'
+    volumes:
+      - ./monitoring/grafana/provisioning/:/etc/grafana/provisioning/
+      - grafana_data:/var/lib/grafana
+    networks:
+      - urlscanner-network
+    depends_on:
+      - prometheus
     restart: unless-stopped
 
 volumes:
   postgres_data:
+  prometheus_data:
+  grafana_data:
 
 networks:
   urlscanner-network:
